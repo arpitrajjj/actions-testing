@@ -1,0 +1,159 @@
+name: Xcode simulator + Free Fire APK screenshots
+
+# Two jobs:
+#  1) ios-simulator : boot the iOS Simulator (Xcode) on macOS and capture its home
+#     screen. NOTE: an Android APK cannot run on iOS — Free Fire goes to job 2.
+#  2) free-fire     : boot an Android emulator (AVD) on Ubuntu, install the Free
+#     Fire APK (com.dts.freefireth), open it and capture the screen.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/xcode-freefire-screenshot.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: xcode-freefire-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator:
+    runs-on: macos-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Boot iOS Simulator (Xcode)
+        run: |
+          set -e
+          xcodebuild -version
+          echo "--- available devices ---"
+          xcrun simctl list devices available | sed -n '1,20p'
+          UDID=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone[^(]*\([0-9A-F-]{36}\)' | grep -oE '[0-9A-F-]{36}')
+          if [ -z "$UDID" ]; then
+            # any available device as fallback
+            UDID=$(xcrun simctl list devices available | grep -m1 -oE '\([0-9A-F-]{36}\)' | tr -d '()')
+          fi
+          echo "Selected UDID: $UDID"
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" 2>/dev/null || echo "(already booted)"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "booted"
+
+      - name: Capture iOS Simulator home screen
+        run: |
+          set -e
+          mkdir -p screenshot
+          sleep 20   # let SpringBoard finish settling
+          xcrun simctl io "$SIM_UDID" screenshot screenshot/ios-simulator-home.png
+          ls -l screenshot/ios-simulator-home.png
+          file screenshot/ios-simulator-home.png
+
+      - name: Upload screenshot to repo (screenshot/ folder)
+        if: always()
+        run: |
+          if [ ! -s screenshot/ios-simulator-home.png ]; then
+            echo "No screenshot produced; nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch origin main
+          git add screenshot/ios-simulator-home.png
+          if git commit -m 'Add iOS Simulator home-screen screenshot [skip ci]'; then
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main --no-edit >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then pushed=1; break; fi
+              echo "push attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the screenshot after retries."
+              exit 1
+            fi
+          else
+            echo "Nothing new to commit."
+          fi
+
+  free-fire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM (hardware acceleration)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Download Free Fire APK
+        run: |
+          set -e
+          curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
+            -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122 Safari/537.36" \
+            -o freefire.apk "https://d.apkpure.com/b/APK/com.dts.freefireth?version=latest"
+          ls -lh freefire.apk
+          file freefire.apk || true
+
+      - name: Boot emulator, install + open Free Fire, capture
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            set -e
+            adb wait-for-device
+            echo "--- installing Free Fire APK ---"
+            adb install -r -g freefire.apk || adb install -r freefire.apk || echo "(install failed — continuing to screenshot anyway)"
+            echo "--- package check ---"
+            adb shell pm list packages | grep -i freefire || echo "(freefire package not present)"
+            echo "--- launching com.dts.freefireth ---"
+            adb shell monkey -p com.dts.freefireth -c android.intent.category.LAUNCHER 1 || true
+            echo "--- waiting for the game to load ---"
+            sleep 60
+            mkdir -p screenshot
+            adb exec-out screencap -p > screenshot/freefire-android.png
+            ls -l screenshot
+            file screenshot/freefire-android.png || true
+
+      - name: Upload screenshot to repo (screenshot/ folder)
+        if: always()
+        run: |
+          if [ ! -s screenshot/freefire-android.png ]; then
+            echo "No screenshot produced; nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch origin main
+          git add screenshot/freefire-android.png
+          if git commit -m 'Add Free Fire (Android emulator) screenshot [skip ci]'; then
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main --no-edit >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then pushed=1; break; fi
+              echo "push attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the screenshot after retries."
+              exit 1
+            fi
+          else
+            echo "Nothing new to commit."
+          fi
