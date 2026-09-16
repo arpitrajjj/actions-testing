@@ -78,9 +78,26 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch origin main
           git add screenshot/macos-home.png
           if git commit -m 'Add macOS home-screen screenshot [skip ci]'; then
-            git push origin HEAD:main
+            # Rebase on the latest main and retry, in case a concurrent run
+            # pushed in between checkout and our push.
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main --no-edit >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then
+                pushed=1
+                break
+              fi
+              echo "push attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the screenshot after retries."
+              exit 1
+            fi
           else
             echo "Nothing new to commit (screenshot identical to previous)."
           fi
