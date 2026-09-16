@@ -1,7 +1,7 @@
 name: MuMu emulator screenshot (macOS)
 
-# Fast path: download MuMu Player (macOS), install, launch, snap a screenshot
-# of the screen ASAP and commit it. No long boot-wait loops.
+# Download MuMu Player (macOS), install, launch the Launcher, CLICK the on-screen
+# "Launch" button to start the Android VM, then capture the screen and commit it.
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   capture:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -44,13 +44,10 @@ jobs:
         run: |
           set -e
           DMG="$RUNNER_TEMP/MuMuPlayer.dmg"
-          MP="/tmp/mumu_mount"
-          mkdir -p "$MP"
+          MP="/tmp/mumu_mount"; mkdir -p "$MP"
           hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MP"
           APP=$(find "$MP" -maxdepth 2 -name "*.app" | head -1)
-          if [ -z "$APP" ]; then
-            echo "No .app in DMG:"; ls -la "$MP"; exit 1
-          fi
+          if [ -z "$APP" ]; then echo "No .app in DMG:"; ls -la "$MP"; exit 1; fi
           cp -R "$APP" /Applications/
           INSTALLED="/Applications/$(basename "$APP")"
           xattr -cr "$INSTALLED" 2>/dev/null || true
@@ -58,33 +55,152 @@ jobs:
           echo "$INSTALLED" > /tmp/mumu_app_path
           echo "MUMU_APP=$INSTALLED" >> "$GITHUB_ENV"
           echo "Installed: $INSTALLED"
+          echo "--- bundle MacOS binaries ---"
+          ls -la "$INSTALLED/Contents/MacOS" || true
+          echo "--- nested .apps ---"
+          find "$INSTALLED/Contents" -maxdepth 4 -name "*.app" 2>/dev/null || echo "(none)"
+          INNER=$(find "$INSTALLED/Contents" -maxdepth 4 -name "*.app" 2>/dev/null | head -1)
+          if [ -n "$INNER" ]; then echo "$INNER" > /tmp/mumu_inner_app; echo "INNER_APP=$INNER" >> "$GITHUB_ENV"; echo "inner app: $INNER"; fi
 
-      - name: Launch MuMu Player and take screenshot
+      - name: Launch MuMu Launcher and wait for window
         run: |
-          APP="${MUMU_APP:-$(cat /tmp/mumu_app_path 2>/dev/null | head -1)}"
-          echo "Launching: $APP"
+          APP="${MUMU_APP:-$(cat /tmp/mumu_app_path | head -1)}"
+          echo "Opening: $APP"
           open "$APP" || true
+          # wait until the MuMu Launcher is a visible app
+          for i in $(seq 1 24); do
+            sleep 5
+            if osascript -e 'tell application "System Events" to (name of every process whose background only is false)' 2>/dev/null | grep -qiE 'mumu'; then
+              echo "MuMu UI present after ~$((i*5))s"
+              break
+            fi
+          done
+          echo "--- GUI processes ---"
+          osascript -e 'tell application "System Events" to get name of every process whose background only is false' 2>&1 || true
 
+      - name: Click the Launch button (UI automation)
+        run: |
+          APP="${MUMU_APP:-$(cat /tmp/mumu_app_path | head -1)}"
+          cat > /tmp/dump.scpt <<'SCPT'
+          on run
+            set out to ""
+            tell application "MuMu Launcher" to activate
+            delay 2
+            tell application "System Events"
+              tell process "MuMu Launcher"
+                set frontmost to true
+                delay 2
+                try
+                  set w to window 1
+                  set theButtons to every button of w
+                  repeat with b in theButtons
+                    try
+                      set bt to title of b
+                    on error
+                      set bt to ""
+                    end try
+                    try
+                      set {bx, by} to position of b
+                      set {bw, bh} to size of b
+                      set out to out & "BTN|" & bt & "|" & bx & "," & by & "|" & bw & "," & bh & linefeed
+                    on error e
+                      set out to out & "BTNERR|" & e & linefeed
+                    end try
+                  end repeat
+                  set out to out & "WINDOWOK|buttons=" & (count of buttons of w) & linefeed
+                on error e
+                  set out to out & "ERR|" & e & linefeed
+                end try
+              end tell
+            end tell
+            return out
+          end run
+          SCPT
+          echo "=== dumping buttons ==="
+          DUMP=$(osascript /tmp/dump.scpt 2>&1 || true)
+          echo "$DUMP"
+
+          # pick a click target: prefer a button named like Launch/Start/启动, else biggest button
+          TX=0; TY=0; BIGAREA=0; NAME_MATCH=""
+          while IFS= read -r line; do
+            case "$line" in
+              BTN\|*)
+                name=$(echo "$line" | cut -d'|' -f2)
+                pos=$(echo "$line" | cut -d'|' -f3); size=$(echo "$line" | cut -d'|' -f4)
+                x=$(echo "$pos" | cut -d, -f1); y=$(echo "$pos" | cut -d, -f2)
+                w=$(echo "$size" | cut -d, -f1); h=$(echo "$size" | cut -d, -f2) || true
+                cx=$((x + w/2)); cy=$((y + h/2))
+                area=$((w*h))
+                echo "button: '$name' pos=$pos size=$size center=> $cx,$cy"
+                if echo "$name" | grep -qiE 'launch|lauch|start|运行|启动' ; then
+                  NAME_MATCH="$name"; TX=$cx; TY=$cy
+                fi
+                if [ "$area" -gt "$BIGAREA" ]; then BIGAREA=$area; BX=$cx; BY=$cy; fi
+                ;;
+            esac
+          done <<< "$DUMP"
+
+          if [ -n "$NAME_MATCH" ]; then CX=$TX; CY=$TY; echo "target: matched='$NAME_MATCH' at $CX,$CY"
+          else CX=$BX; CY=$BY; echo "target: largest button at $CX,$CY"; fi
+
+          # Attempt 1: accessibility click via System Events by button title
+          if [ -n "$NAME_MATCH" ]; then
+            cat > /tmp/click.scpt <<SCPT2
+            on run
+              tell application "MuMu Launcher" to activate
+              delay 1
+              tell application "System Events"
+                tell process "MuMu Launcher"
+                  set frontmost to true
+                  delay 1
+                  click (first button of window 1 whose title is "$NAME_MATCH")
+                end tell
+              end tell
+              return "clicked"
+            end run
+SCPT2
+            RES=$(osascript /tmp/click.scpt 2>&1 || true)
+            echo "System Events click result [1]: $RES"
+          fi
+
+          # Attempt 2: coordinate click via cliclick (installed on the fly)
+          if [ "$CX" != "0" ] && [ "$CY" != "0" ]; then
+            if command -v cliclick >/dev/null 2>&1 || brew install cliclick --quiet >/dev/null 2>&1; then
+              echo "cliclick at $CX,$CY"
+              cliclick "c:$CX,$CY" 2>&1 || true
+            else
+              echo "cliclick unavailable"
+            fi
+          fi
+
+          echo "=== processes after click attempt ==="
+          sleep 3
+          ps -A -o comm | grep -iE 'mumu|nemu|qemu' || echo "(only launcher?)"
+
+      - name: Capture screen after clicking Launch
+        run: |
           mkdir -p screenshot
-          # snap the screen at several points; keep the latest
-          for t in 20 40 60; do
-            sleep 20
+          APP="${MUMU_APP:-$(cat /tmp/mumu_app_path | head -1)}"
+          # Also try opening the inner emulator app directly if one exists
+          if [ -n "${INNER_APP:-}" ]; then
+            echo "opening inner emulator: $INNER_APP"
+            open "$INNER_APP" 2>/dev/null || true
+          fi
+
+          for t in 15 30 45 60; do
+            sleep 15
             screencapture -x screenshot/mumu-home.png || true
             echo "snap @+${t}s: $(ls -l screenshot/mumu-home.png 2>/dev/null | awk '{print $5}') bytes"
           done
 
-          echo "--- processes ---"
-          ps -A -o comm | grep -iE 'mumu|nemu|qemu' || echo "(no mumu/nemu/qemu processes)"
-          echo "--- files ---"
-          ls -l screenshot || true
-          file screenshot/*.png 2>/dev/null || true
+          echo "--- processes now ---"
+          ps -A -o comm | grep -iE 'mumu|nemu|qemu' || echo "(none)"
+          file screenshot/mumu-home.png 2>/dev/null || true
 
       - name: Upload screenshot to repo (screenshot/ folder)
         if: always()
         run: |
-          shopt -s nullglob
-          FILES=(screenshot/mumu-home.png)
-          if [ ${#FILES[@]} -eq 0 ] || [ ! -s screenshot/mumu-home.png ]; then
+          if [ ! -s screenshot/mumu-home.png ]; then
             echo "No screenshot produced; nothing to commit."
             exit 0
           fi
