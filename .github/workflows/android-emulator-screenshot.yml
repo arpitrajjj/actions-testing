@@ -1,0 +1,88 @@
+name: Android emulator screenshot
+
+# Boots a real Android Emulator (AVD) on an Ubuntu runner using KVM and
+# captures the Android home screen, then commits the PNG to the repo's
+# screenshot/ folder (NOT uploaded as a workflow artifact).
+#
+# Why not BlueStacks/MuMu here: those are hypervisor apps that need VT-x,
+# and no free GitHub-hosted runner exposes nested virtualization in a form
+# they can use. The official Android Emulator DOES boot on ubuntu-latest
+# because GitHub's Linux runners expose KVM (/dev/kvm).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/android-emulator-screenshot.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-emulator-screenshot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM (hardware acceleration)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Boot emulator and capture Android home screen
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            command -v adb || export PATH="$ANDROID_SDK_ROOT/platform-tools:$ANDROID_HOME/platform-tools:$PATH"
+            adb wait-for-device
+            adb shell input keyevent 3          # HOME -> launcher
+            sleep 20                             # let the launcher settle
+            mkdir -p screenshot
+            adb exec-out screencap -p > screenshot/android-home.png
+            ls -l screenshot
+            file screenshot/android-home.png
+
+      - name: Upload screenshot to repo (screenshot/ folder)
+        if: always()
+        run: |
+          if [ ! -s screenshot/android-home.png ]; then
+            echo "No screenshot was produced; nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch origin main
+          git add screenshot/android-home.png
+          if git commit -m 'Add Android home-screen screenshot [skip ci]'; then
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main --no-edit >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then
+                pushed=1
+                break
+              fi
+              echo "push attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the screenshot after retries."
+              exit 1
+            fi
+          else
+            echo "Nothing new to commit (screenshot identical to previous)."
+          fi

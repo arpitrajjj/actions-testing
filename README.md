@@ -1,35 +1,38 @@
 # actions-testing
 
-A GitHub Actions workflow that, on a **macOS** runner:
+GitHub Actions experiments that capture **home-screen screenshots** and commit
+them to this repo under [`screenshot/`](screenshot/) (not as workflow artifacts).
 
-1. Boots a `macos-latest` runner.
-2. Captures the macOS **home screen** (the Desktop) using the built-in `screencapture` utility.
-3. Commits the PNG to this repo under [`screenshot/`](screenshot/) — **not** as a workflow artifact.
+## Workflows
 
-## Workflow
+| Workflow | Runner | What it captures | Output |
+| --- | --- | --- | --- |
+| **Android emulator screenshot** | `ubuntu-latest` | Boots a real **Android Emulator (AVD)** via KVM and captures the Android **home screen** | `screenshot/android-home.png` |
+| **macOS home screen screenshot** | `macos-latest` | Captures the macOS **Desktop** | `screenshot/macos-home.png` |
 
-File: [`.github/workflows/macos-screenshot.yml`](.github/workflows/macos-screenshot.yml)
+File: `.github/workflows/android-emulator-screenshot.yml`
 
-| Trigger | When it runs |
-| --- | --- |
-| `push` | When the workflow file itself is changed on `main` |
-| `workflow_dispatch` | Manually, from the **Actions** tab → **Run workflow** |
+### Why not BlueStacks / MuMu?
 
-The screenshot lands at `screenshot/macos-home.png`.
+BlueStacks, MuMu, LDPlayer, etc. are Windows/Android-x86 hypervisor apps that
+require **VT-x/AMD-V** exposed to the host. No free GitHub-hosted runner (Windows
+or otherwise) provides that. The **official Android Emulator**, however, boots on
+`ubuntu-latest` because GitHub's Linux runners expose **KVM** (`/dev/kvm`).
 
-## How the screenshot is captured
+## How the Android screenshot is captured
 
 ```bash
-osascript -e 'tell application "Finder" to activate'   # show the Desktop
-screencapture -x screenshot/macos-home.png             # -x = no shutter sound
+# KVM enabled first, then:
+adb wait-for-device
+adb shell input keyevent 3                  # HOME
+adb exec-out screencap -p > screenshot/android-home.png
 ```
 
-The upload uses the workflow's `GITHUB_TOKEN` (with `permissions: contents: write`)
-and a plain `git push` — so the image always lives in the repository, viewable on
-GitHub.
+Both workflows push with the `GITHUB_TOKEN` (`permissions: contents: write`),
+using a plain `git push` so the image always lives in the repository.
 
 ## Manual run
 
 1. Open the **Actions** tab.
-2. Select **macOS home screen screenshot**.
+2. Pick the workflow you want.
 3. Click **Run workflow** → **Run workflow** on `main`.
