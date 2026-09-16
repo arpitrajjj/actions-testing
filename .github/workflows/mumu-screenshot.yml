@@ -1,0 +1,141 @@
+name: MuMu emulator screenshot
+
+# Captures the MuMu Player Android home screen and commits the PNG to the
+# repository's screenshot/ folder (NOT uploaded as a workflow artifact).
+#
+# Important — virtualization requirement:
+# MuMu Player is a hypervisor-based Android emulator and needs VT-x / AMD-V.
+# The normal GitHub-hosted Windows runner (`windows-latest`) is itself a VM
+# WITHOUT nested virtualization, so MuMu usually cannot boot there.
+# If this run fails with a "virtualization not enabled" / black-screen symptom,
+# switch `runs-on` to:
+#   1) a self-hosted Windows runner (VT enabled in BIOS, Hyper-V OFF), or
+#   2) a GitHub "larger" Windows runner (billed per minute, nested virt on).
+#
+# MuMu 12 main instance ADB port: 16384 (+32 per extra instance).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/mumu-screenshot.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mumu-screenshot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      MUMU_DL: "https://api.mumuplayer.com/api/dl/win?channel=gw-overseas12"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Report virtualization environment
+        shell: pwsh
+        run: |
+          $cs = Get-CimInstance Win32_ComputerSystem
+          "HypervisorPresent : $($cs.HypervisorPresent)"
+          systeminfo | Select-String -Pattern "Hyper-V|Virtualization"
+
+      - name: Install adb (platform-tools)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'platform-tools.zip'
+          Invoke-WebRequest -Uri 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip' -OutFile $zip -UseBasicParsing
+          $dest = Join-Path $env:RUNNER_TEMP 'platform-tools'
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $dest 'platform-tools')
+
+      - name: Download MuMu Player installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:RUNNER_TEMP 'MuMuInstaller.exe'
+          Invoke-WebRequest -Uri $env:MUMU_DL -OutFile $exe -UseBasicParsing -Headers @{ 'User-Agent' = 'Mozilla/5.0' }
+          "Installer size: $((Get-Item $exe).Length) bytes"
+
+      - name: Install MuMu Player (silent)
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'MuMuInstaller.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList '/S' -PassThru
+          "Installer PID: $($p.Id)"
+          $null = $p.WaitForExit(600000)   # up to 10 min (may download the Android image)
+          "Installer exit code: $($p.ExitCode)"
+
+      - name: Start MuMu Player
+        shell: pwsh
+        run: |
+          $roots = @("C:\Program Files", "C:\Program Files (x86)", $env:LOCALAPPDATA)
+          $candidates = Get-ChildItem -Path $roots -Recurse -Depth 5 -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match '^(MuMuPlayer|MuMuManager|nemu.*)\.exe$' } |
+              Sort-Object FullName -Unique
+          if (-not $candidates) {
+            "No MuMu executables found. Top-level directories on C:"
+            Get-ChildItem -Path 'C:\' -Directory -ErrorAction SilentlyContinue | Select-Object -First 40 -ExpandProperty Name
+            throw "MuMu installation not found"
+          }
+          $candidates | Select-Object FullName | Format-Table -AutoSize
+          $launcher = ($candidates | Where-Object { $_.Name -eq 'MuMuPlayer.exe' } | Select-Object -First 1).FullName
+          if (-not $launcher) { $launcher = $candidates[0].FullName }
+          "Launching: $launcher"
+          Start-Process -FilePath $launcher
+
+      - name: Wait for emulator and capture home screen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ports = @(16384, 16385, 16416, 16448, 16480, 7555)
+          foreach ($port in $ports) { adb connect "127.0.0.1:$port" 2>&1 | Out-Null }
+          $connected = $null
+          $deadline = (Get-Date).AddMinutes(15)
+          while ((Get-Date) -lt $deadline) {
+            $devs = adb devices
+            "--- adb devices ---"
+            $devs
+            $line = $devs | Where-Object { $_ -match '127\.0\.0\.1:\d+\s+device' } | Select-Object -First 1
+            if ($line) {
+              $connected = ([regex]::Match($line, '127\.0\.0\.1:\d+')).Value
+              break
+            }
+            Start-Sleep -Seconds 15
+            foreach ($port in $ports) { adb connect "127.0.0.1:$port" 2>&1 | Out-Null }
+          }
+          if (-not $connected) {
+            throw "MuMu emulator did not come online via adb within 15 minutes. See the virtualization note at the top of this workflow file."
+          }
+          "Connected: $connected"
+          adb -s $connected shell input keyevent 3      # KEYCODE_HOME -> home screen
+          Start-Sleep -Seconds 15                        # let the launcher settle
+          adb -s $connected shell screencap -p /sdcard/mumu-home.png
+          New-Item -ItemType Directory -Force -Path screenshot | Out-Null
+          adb -s $connected pull /sdcard/mumu-home.png screenshot/mumu-home.png
+          Get-Item screenshot/mumu-home.png | Select-Object FullName, Length
+
+      - name: Upload screenshot to repo (screenshot/ folder)
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'screenshot\mumu-home.png')) {
+            "No screenshot was produced; nothing to commit."
+            exit 0
+          }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add screenshot/mumu-home.png
+          git commit -m 'Add MuMu home-screen screenshot [skip ci]'
+          if ($LASTEXITCODE -eq 0) {
+            git push origin HEAD:main
+          } else {
+            "Nothing new to commit (screenshot identical to previous)."
+          }
