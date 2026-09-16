@@ -129,23 +129,26 @@ jobs:
             set -e
             adb wait-for-device
             echo "--- installing Free Fire APK ---"
-            adb install -r -g freefire.apk || adb install -r freefire.apk || echo "(install failed — continuing anyway)"
+            adb install -r -g freefire.apk || adb install -r freefire.apk || true
             echo "--- package check ---"
-            adb shell pm list packages | grep -i freefire || echo "(freefire package not present)"
-            echo "--- resolving main activity ---"
-            ACT=$(adb shell cmd package resolve-activity --brief com.dts.freefireth 2>/dev/null | tail -1 | tr -d '\r')
-            echo "resolved activity: ${ACT:-unknown}"
-            echo "--- launching Free Fire ---"
-            adb shell monkey -p com.dts.freefireth -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-            if [ -n "$ACT" ]; then adb shell am start -n "$ACT" >/dev/null 2>&1 || true; fi
-            echo "--- snapping over time — first launch shows data-download/login ---"
+            adb shell pm list packages | grep -i freefire || true
+            echo "--- resolve launcher activity ---"
+            adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER com.dts.freefireth || true
+            ACT=$(adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER com.dts.freefireth 2>/dev/null | tr -d '\r' | tail -1 || true)
+            echo "resolved=$ACT"
+            adb shell am start -n "$ACT" || true
+            adb shell monkey -p com.dts.freefireth -c android.intent.category.LAUNCHER 1 || true
+            echo "--- snap early (splash) ---"
             mkdir -p screenshot
-            for t in 30 60 90 120 150 180 210 240 270 300; do
-              sleep 30
-              adb exec-out screencap -p > screenshot/freefire-android.png || true
-              F=$(adb shell dumpsys window 2>/dev/null | grep -iE 'mCurrentFocus|mFocusedApp' | tr -d '\r' || true)
-              echo "t=${t}s :: $F"
-            done
+            sleep 20
+            adb exec-out screencap -p > screenshot/freefire-android.png || true
+            adb shell dumpsys window | grep -iE 'mCurrentFocus' || true
+            sleep 30
+            adb exec-out screencap -p > screenshot/freefire-android.png || true
+            sleep 60
+            adb exec-out screencap -p > screenshot/freefire-android.png || true
+            sleep 90
+            adb exec-out screencap -p > screenshot/freefire-android.png || true
             ls -l screenshot
             file screenshot/freefire-android.png || true
 
