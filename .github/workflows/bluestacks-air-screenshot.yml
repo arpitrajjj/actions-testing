@@ -1,0 +1,139 @@
+name: BlueStacks Air screenshot (macOS)
+
+# Download the official BlueStacks Air (macOS / Apple Silicon) installer, install
+# it silently, OPEN the app (no clicking/tapping needed), then capture the screen
+# and commit it to screenshot/.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bluestacks-air-screenshot.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bluestacks-air-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: System info
+        run: |
+          sw_vers
+          echo "arch: $(uname -m)"
+          echo "hv_support: $(sysctl -n kern.hv_support 2>/dev/null || echo n/a)"
+          df -h /
+
+      - name: Download BlueStacks Air installer
+        run: |
+          set -e
+          PKG="$RUNNER_TEMP/BlueStacksAir.pkg"
+          API="https://cloud.bluestacks.com/api/getdownloadnow?platform=mac&win_version=&mac_version=&client_uuid=&platform_cloud=&preferred_lang=en&utm_source=https%3A%2F%2Fwww.bluestacks.com&utm_medium=&gaCookie="
+          curl -fL --retry 5 --retry-delay 3 --connect-timeout 30 -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/122.0 Safari/537.36" -o "$PKG" "$API"
+          ls -lh "$PKG"
+          file "$PKG"
+
+      - name: Install BlueStacks Air (silent pkg)
+        run: |
+          set -e
+          PKG="$RUNNER_TEMP/BlueStacksAir.pkg"
+          sudo installer -pkg "$PKG" -target /
+          echo "--- /Applications (BlueStacks) ---"
+          ls -d /Applications/*[Bb]lue[Ss]tacks* 2>/dev/null || ls /Applications | grep -i bluestacks || echo "(not found in /Applications)"
+          APP=$(ls -d /Applications/*[Bb]lue[Ss]tacks*.app 2>/dev/null | head -1)
+          if [ -n "$APP" ]; then
+            echo "$APP" > /tmp/bs_app_path
+            echo "BS_APP=$APP" >> "$GITHUB_ENV"
+            echo "Installed app: $APP"
+          fi
+
+      - name: Open BlueStacks Air (no clicking)
+        run: |
+          APP="${BS_APP:-$(cat /tmp/bs_app_path 2>/dev/null | head -1)}"
+          if [ -z "$APP" ]; then APP=$(ls -d /Applications/*[Bb]lue[Ss]tacks*.app 2>/dev/null | head -1); fi
+          echo "Opening: $APP"
+          if [ -n "$APP" ]; then
+            open "$APP" || true
+          else
+            open -a "BlueStacks" 2>/dev/null || open -a "BlueStacks Air" 2>/dev/null || true
+          fi
+          for i in $(seq 1 24); do
+            sleep 5
+            if osascript -e 'tell application "System Events" to (name of every process whose background only is false)' 2>/dev/null | grep -qi 'bluestacks'; then
+              echo "BlueStacks UI present after ~$((i*5))s"
+              break
+            fi
+          done
+          echo "--- GUI processes ---"
+          osascript -e 'tell application "System Events" to get name of every process whose background only is false' 2>&1 || true
+          echo "--- bluestacks processes ---"
+          ps -A -o comm | grep -iE 'bluestacks|hd-player|qemu' || echo "(none)"
+
+      - name: Capture BlueStacks Air screen
+        run: |
+          mkdir -p screenshot
+          # attempt in-emulator Android home screen via BlueStacks' bundled adb
+          for adb in "/Applications/BlueStacks.app/Contents/MacOS/adb" "/Applications/BlueStacks.app/Contents/Runtime/uHD-Adb"; do
+            if [ -x "$adb" ]; then
+              "$adb" devices 2>/dev/null | sed -n '1,5p' || true
+              D=$("$adb" devices 2>/dev/null | awk '$2=="device"{print $1; exit}')
+              if [ -n "$D" ]; then
+                "$adb" shell input keyevent 3 2>/dev/null || true
+                sleep 10
+                "$adb" exec-out screencap -p > screenshot/bluestacks-android-home.png 2>/dev/null || true
+                echo "adb capture: $(file screenshot/bluestacks-android-home.png 2>/dev/null || echo none)"
+              fi
+              break
+            fi
+          done
+
+          # host screen capture
+          for t in 20 40 60 80 100 120 140 160 180; do
+            sleep 20
+            screencapture -x screenshot/bluestacks-home.png || true
+            echo "snap @+${t}s: $(ls -l screenshot/bluestacks-home.png 2>/dev/null | awk '{print $5}') bytes"
+          done
+          echo "--- files ---"
+          ls -l screenshot || true
+          file screenshot/*.png 2>/dev/null || true
+
+      - name: Upload screenshot to repo (screenshot/ folder)
+        if: always()
+        run: |
+          shopt -s nullglob
+          FILES=(screenshot/bluestacks-home.png screenshot/bluestacks-android-home.png)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No screenshots produced; nothing to commit."
+            exit 0
+          fi
+          echo "Will commit: ${FILES[@]}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch origin main
+          git add -- "${FILES[@]}"
+          if git commit -m 'Add BlueStacks Air (macOS) screenshot [skip ci]'; then
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main --no-edit >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then pushed=1; break; fi
+              echo "push attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the screenshot after retries."
+              exit 1
+            fi
+          else
+            echo "Nothing new to commit (screenshot identical to previous)."
+          fi
