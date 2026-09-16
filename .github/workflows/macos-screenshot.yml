@@ -1,0 +1,86 @@
+name: macOS home screen screenshot
+
+# Runs on a macOS runner: captures the macOS home screen (Desktop) with the
+# built-in `screencapture` utility, then commits the PNG to the repository's
+# screenshot/ folder (NOT uploaded as a workflow artifact).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/macos-screenshot.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-screenshot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show environment info
+        shell: bash
+        run: |
+          echo "--- macOS version ---"
+          sw_vers
+          echo "--- display info ---"
+          system_profiler SPDisplaysDataType 2>/dev/null | sed -n '1,40p'
+
+      - name: Capture macOS home screen (Desktop)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p screenshot
+
+          # Bring Finder/Desktop to the front so we capture the actual home screen.
+          osascript -e 'tell application "Finder" to activate' 2>/dev/null || true
+          sleep 3
+
+          # -x : suppress the camera shutter sound (headless-friendly).
+          # Retry across displays if the first attempt comes up empty.
+          captured=0
+          for opts in "-x" "-x -D 1" "-x -D 2" "-x -C"; do
+            rm -f screenshot/macos-home.png
+            if screencapture $opts screenshot/macos-home.png && [ -s screenshot/macos-home.png ]; then
+              captured=1
+              break
+            fi
+            echo "retrying screencapture with: $opts"
+            sleep 2
+          done
+
+          if [ "$captured" -ne 1 ]; then
+            echo "::error::screencapture did not produce an image."
+            exit 1
+          fi
+
+          echo "--- result ---"
+          ls -l screenshot
+          file screenshot/macos-home.png
+          sips -g pixelWidth -g pixelHeight screenshot/macos-home.png
+
+      - name: Upload screenshot to repo (screenshot/ folder)
+        if: always()
+        shell: bash
+        run: |
+          if [ ! -s screenshot/macos-home.png ]; then
+            echo "No screenshot was produced; nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add screenshot/macos-home.png
+          if git commit -m 'Add macOS home-screen screenshot [skip ci]'; then
+            git push origin HEAD:main
+          else
+            echo "Nothing new to commit (screenshot identical to previous)."
+          fi
