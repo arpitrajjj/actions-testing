@@ -49,23 +49,22 @@ jobs:
           PKG="$RUNNER_TEMP/BlueStacksAir.pkg"
           sudo installer -pkg "$PKG" -target /
           echo "--- /Applications (BlueStacks) ---"
-          ls -d /Applications/*[Bb]lue[Ss]tacks* 2>/dev/null || ls /Applications | grep -i bluestacks || echo "(not found in /Applications)"
-          APP=$(ls -d /Applications/*[Bb]lue[Ss]tacks*.app 2>/dev/null | head -1)
-          if [ -n "$APP" ]; then
-            echo "$APP" > /tmp/bs_app_path
-            echo "BS_APP=$APP" >> "$GITHUB_ENV"
-            echo "Installed app: $APP"
-          fi
+          ls -da /Applications/*[Bb]lue[Ss]tacks* 2>/dev/null || echo "(none)"
+          echo "--- ALL of /Applications ---"
+          ls /Applications | head -60
 
       - name: Open BlueStacks Air (no clicking)
         run: |
-          APP="${BS_APP:-$(cat /tmp/bs_app_path 2>/dev/null | head -1)}"
-          if [ -z "$APP" ]; then APP=$(ls -d /Applications/*[Bb]lue[Ss]tacks*.app 2>/dev/null | head -1); fi
-          echo "Opening: $APP"
-          if [ -n "$APP" ]; then
-            open "$APP" || true
+          # Prefer the actual player, else the multi-instance manager.
+          PLAYER=$(ls -d /Applications/*[Bb]lue[Ss]tacks*.app 2>/dev/null | grep -iv 'multi' | head -1)
+          if [ -z "$PLAYER" ]; then PLAYER=$(ls -d /Applications/*[Bb]lue[Ss]tacks*.app 2>/dev/null | head -1); fi
+          echo "Player app: ${PLAYER:-NONE}"
+          if [ -n "$PLAYER" ]; then
+            echo "$PLAYER" > /tmp/bs_app_path
+            echo "BS_APP=$PLAYER" >> "$GITHUB_ENV"
+            open "$PLAYER" || true
           else
-            open -a "BlueStacks" 2>/dev/null || open -a "BlueStacks Air" 2>/dev/null || true
+            open -a "BlueStacks Air" 2>/dev/null || open -a "BlueStacks" 2>/dev/null || true
           fi
           for i in $(seq 1 24); do
             sleep 5
@@ -76,34 +75,36 @@ jobs:
           done
           echo "--- GUI processes ---"
           osascript -e 'tell application "System Events" to get name of every process whose background only is false' 2>&1 || true
-          echo "--- bluestacks processes ---"
+          echo "--- bluestacks/qemu processes ---"
           ps -A -o comm | grep -iE 'bluestacks|hd-player|qemu' || echo "(none)"
 
       - name: Capture BlueStacks Air screen
         run: |
           mkdir -p screenshot
-          # attempt in-emulator Android home screen via BlueStacks' bundled adb
-          for adb in "/Applications/BlueStacks.app/Contents/MacOS/adb" "/Applications/BlueStacks.app/Contents/Runtime/uHD-Adb"; do
-            if [ -x "$adb" ]; then
-              "$adb" devices 2>/dev/null | sed -n '1,5p' || true
-              D=$("$adb" devices 2>/dev/null | awk '$2=="device"{print $1; exit}')
-              if [ -n "$D" ]; then
-                "$adb" shell input keyevent 3 2>/dev/null || true
-                sleep 10
-                "$adb" exec-out screencap -p > screenshot/bluestacks-android-home.png 2>/dev/null || true
-                echo "adb capture: $(file screenshot/bluestacks-android-home.png 2>/dev/null || echo none)"
-              fi
-              break
-            fi
+          # in-emulator Android home screen via BlueStacks' bundled adb (search broadly)
+          ADB=""
+          for p in /Applications/*BlueStacks*/Contents/MacOS/adb /Applications/*BlueStacks*/Contents/Runtime/uHD-Adb /Applications/*BlueStacks*/Contents/*/adb; do
+            ls $p >/dev/null 2>&1 && { ADB=$p; break; }
           done
+          if [ -z "$ADB" ]; then ADB=$(find /Applications -maxdepth 6 -name '*adb*' -type f 2>/dev/null | head -1); fi
+          echo "adb: ${ADB:-none}"
+          if [ -n "$ADB" ] && [ -x "$ADB" ]; then
+            "$ADB" devices 2>&1 | sed -n '1,5p' || true
+            D=$("$ADB" devices 2>/dev/null | awk '$2=="device"{print $1; exit}')
+            if [ -n "$D" ]; then
+              "$ADB" shell input keyevent 3 2>/dev/null || true
+              sleep 10
+              "$ADB" exec-out screencap -p > screenshot/bluestacks-android-home.png 2>/dev/null || true
+            fi
+          fi
 
-          # host screen capture
+          # host screen capture (repeated, keep the latest)
           for t in 20 40 60 80 100 120 140 160 180; do
             sleep 20
             screencapture -x screenshot/bluestacks-home.png || true
             echo "snap @+${t}s: $(ls -l screenshot/bluestacks-home.png 2>/dev/null | awk '{print $5}') bytes"
           done
-          echo "--- files ---"
+          echo "--- files in screenshot/ ---"
           ls -l screenshot || true
           file screenshot/*.png 2>/dev/null || true
 
@@ -111,7 +112,10 @@ jobs:
         if: always()
         run: |
           shopt -s nullglob
-          FILES=(screenshot/bluestacks-home.png screenshot/bluestacks-android-home.png)
+          FILES=()
+          for f in screenshot/bluestacks-home.png screenshot/bluestacks-android-home.png; do
+            [ -s "$f" ] && FILES+=("$f")
+          done
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "No screenshots produced; nothing to commit."
             exit 0
