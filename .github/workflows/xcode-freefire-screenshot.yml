@@ -129,15 +129,23 @@ jobs:
             set -e
             adb wait-for-device
             echo "--- installing Free Fire APK ---"
-            adb install -r -g freefire.apk || adb install -r freefire.apk || echo "(install failed — continuing to screenshot anyway)"
+            adb install -r -g freefire.apk || adb install -r freefire.apk || echo "(install failed — continuing anyway)"
             echo "--- package check ---"
             adb shell pm list packages | grep -i freefire || echo "(freefire package not present)"
-            echo "--- launching com.dts.freefireth ---"
-            adb shell monkey -p com.dts.freefireth -c android.intent.category.LAUNCHER 1 || true
-            echo "--- waiting for the game to load ---"
-            sleep 60
+            echo "--- resolving main activity ---"
+            ACT=$(adb shell cmd package resolve-activity --brief com.dts.freefireth 2>/dev/null | tail -1 | tr -d '\r')
+            echo "resolved activity: ${ACT:-unknown}"
+            echo "--- launching Free Fire ---"
+            adb shell monkey -p com.dts.freefireth -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+            if [ -n "$ACT" ]; then adb shell am start -n "$ACT" >/dev/null 2>&1 || true; fi
+            echo "--- snapping over time — first launch shows data-download/login ---"
             mkdir -p screenshot
-            adb exec-out screencap -p > screenshot/freefire-android.png
+            for t in 30 60 90 120 150 180 210 240 270 300; do
+              sleep 30
+              adb exec-out screencap -p > screenshot/freefire-android.png || true
+              F=$(adb shell dumpsys window 2>/dev/null | grep -iE 'mCurrentFocus|mFocusedApp' | tr -d '\r' || true)
+              echo "t=${t}s :: $F"
+            done
             ls -l screenshot
             file screenshot/freefire-android.png || true
 
