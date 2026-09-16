@@ -101,11 +101,22 @@ jobs:
       - name: Download Free Fire APK
         run: |
           set -e
-          curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
-            -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122 Safari/537.36" \
-            -o freefire.apk "https://d.apkpure.com/b/APK/com.dts.freefireth?version=latest"
+          ok=0
+          # APKPure 403s datacenter IPs unless a Referer is sent; keep a net-mirror fallback.
+          for url in \
+            "https://d.apkpure.com/b/APK/com.dts.freefireth?version=latest" \
+            "https://d.apkpure.net/b/APK/com.dts.freefireth?version=latest" ; do
+            echo "trying: $url"
+            if curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
+                 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122 Safari/537.36" \
+                 -e "https://apkpure.com/" \
+                 -o freefire.apk "$url"; then
+              ok=1; break
+            fi
+          done
+          if [ "$ok" -ne 1 ]; then echo "::error::APK download failed"; exit 1; fi
           ls -lh freefire.apk
-          file freefire.apk || true
+          head -c 8 freefire.apk | od -c | head -1   # expect P K (zip) header
 
       - name: Boot emulator, install + open Free Fire, capture
         uses: reactivecircus/android-emulator-runner@v2
