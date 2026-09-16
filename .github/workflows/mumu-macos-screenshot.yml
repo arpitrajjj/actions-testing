@@ -1,0 +1,184 @@
+name: MuMu emulator screenshot (macOS)
+
+# Downloads the MuMu Player Pro (macOS / Apple Silicon) DMG, installs it, launches
+# the emulator and captures its Android home screen into screenshot/.
+#
+# NOTE: MuMu Player for Mac requires a genuine Apple Silicon / arm64 host AND
+# Hardware Virtualization (Apple Virtualization.Framework). GitHub's arm64 macOS
+# runners are VMs and officially do NOT support nested virtualization, so the
+# emulator may fail to boot with an HV error. We try anyway and report clearly.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/mumu-macos-screenshot.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mumu-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: System info
+        run: |
+          sw_vers
+          echo "arch: $(uname -m)"
+          echo "hv_support: $(sysctl -n kern.hv_support 2>/dev/null || echo n/a)"
+          df -h /
+
+      - name: Install adb (platform-tools) for in-emulator capture
+        run: |
+          curl -fLs --retry 3 -o /tmp/platform-tools.zip \
+            https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
+          unzip -q -o /tmp/platform-tools.zip -d /tmp
+          echo "/tmp/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Download MuMu Player (macOS)
+        run: |
+          set -e
+          DMG="$RUNNER_TEMP/MuMuPlayer.dmg"
+          URL="https://api.mumuplayer.com/api/dl/mac?channel=default"
+          for i in 1 2 3 4 5; do
+            curl -fL --retry 5 --retry-delay 3 --connect-timeout 30 -C - -o "$DMG" "$URL" && break
+            echo "attempt $i failed; retrying..."
+            sleep 5
+          done
+          test -s "$DMG"
+          ls -lh "$DMG"
+          file "$DMG"
+
+      - name: Mount and install MuMu Player
+        run: |
+          set -e
+          DMG="$RUNNER_TEMP/MuMuPlayer.dmg"
+          MP="/tmp/mumu_mount"
+          mkdir -p "$MP"
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MP"
+          echo "--- DMG contents ---"
+          ls -la "$MP"
+          APP=$(find "$MP" -maxdepth 2 -name "*.app" | head -1)
+          PKG=$(find "$MP" -maxdepth 2 -name "*.pkg" | head -1)
+          if [ -n "$APP" ]; then
+            echo "Installing app: $APP"
+            cp -R "$APP" /Applications/
+            INSTALLED="/Applications/$(basename "$APP")"
+            echo "Installed: $INSTALLED"
+            xattr -cr "$INSTALLED" 2>/dev/null || true
+            echo "$INSTALLED" > /tmp/mumu_app_path
+            echo "$INSTALLED" >> "$GITHUB_ENV"
+          elif [ -n "$PKG" ]; then
+            echo "Installing pkg: $PKG"
+            sudo installer -pkg "$PKG" -target /
+            ls -d /Applications/*[Mm]u[Mm]u*.app | head -1 > /tmp/mumu_app_path || true
+          else
+            echo "No .app or .pkg found in DMG!"
+            exit 1
+          fi
+          hdiutil detach "$MP" -force 2>/dev/null || true
+          echo "--- /Applications (mumu) ---"
+          ls -d /Applications/*[Mm]u[Mm]u* 2>/dev/null || true
+
+      - name: Launch MuMu Player
+        run: |
+          set -e
+          APP=$(cat /tmp/mumu_app_path 2>/dev/null | head -1)
+          [ -n "$APP" ] || APP=$(ls -d /Applications/*[Mm]u[Mm]u*.app 2>/dev/null | head -1)
+          echo "Launching: $APP"
+          open "$APP" || true
+          sleep 15
+          echo "--- GUI processes ---"
+          osascript -e 'tell application "System Events" to get name of every process whose background only is false' 2>/dev/null || true
+          echo "--- processes matching mumu/nemu ---"
+          ps -A -o comm | grep -iE 'mumu|nemu' || true
+
+      - name: Wait for MuMu GUI window
+        run: |
+          set -e
+          deadline=$((SECONDS + 1500))   # up to 25 min
+          found=0
+          while [ $SECONDS -lt $deadline ]; do
+            if osascript -e 'tell application "System Events" to (name of every process whose background only is false)' 2>/dev/null | grep -qi 'mumu'; then
+              found=1
+              break
+            fi
+            sleep 15
+          done
+          echo "MuMu GUI present: $found"
+          if [ "$found" -ne 1 ]; then
+            echo "::warning::MuMu GUI never appeared; will still attempt a screenshot."
+          fi
+          # give Android a chance to finish booting to the home screen
+          sleep 90
+
+      - name: Capture MuMu emulator home screen
+        run: |
+          set -e
+          mkdir -p screenshot
+
+          # 1) attempt an in-emulator capture via adb (crisp Android home screen)
+          if command -v adb >/dev/null 2>&1; then
+            for port in 5555 16384 7555 27042 5038 21503; do
+              adb connect "127.0.0.1:$port" >/dev/null 2>&1 || true
+            done
+            D=$(adb devices | awk '$2=="device"{print $1; exit}')
+            if [ -n "$D" ]; then
+              echo "adb device: $D"
+              adb -s "$D" shell input keyevent 3 || true      # HOME
+              sleep 10
+              adb -s "$D" exec-out screencap -p > screenshot/mumu-android-home.png || true
+            fi
+          fi
+
+          # 2) host screen capture (shows the MuMu window incl. Android home)
+          APP=$(cat /tmp/mumu_app_path 2>/dev/null | head -1)
+          if [ -n "$APP" ]; then
+            open "$APP" 2>/dev/null || true   # bring to front
+          fi
+          sleep 5
+          screencapture -x screenshot/mumu-home.png
+          echo "--- results ---"
+          ls -l screenshot || true
+          file screenshot/*.png 2>/dev/null || true
+
+      - name: Upload screenshots to repo (screenshot/ folder)
+        if: always()
+        run: |
+          set -e
+          shopt -s nullglob
+          FILES=(screenshot/mumu-home.png screenshot/mumu-android-home.png)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No screenshots produced; nothing to commit."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch origin main
+          git add screenshot/mumu-home.png screenshot/mumu-android-home.png
+          if git commit -m 'Add MuMu (macOS) emulator screenshot [skip ci]'; then
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main --no-edit >/dev/null 2>&1 || true
+              if git push origin HEAD:main; then pushed=1; break; fi
+              echo "push attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the screenshot after retries."
+              exit 1
+            fi
+          else
+            echo "Nothing new to commit (screenshots identical to previous)."
+          fi
