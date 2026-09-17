@@ -1,0 +1,51 @@
+name: Android Emulator — Live (macOS runner)
+
+# Boots a real Android Emulator on the macOS (arm64) runner using the preinstalled
+# SDK. Since the arm64 runner has NO hardware virtualization (hv_support=0), the
+# emulator boots in pure-software TCG mode (-accel off) with an arm64-v8a image.
+# Screen streams as raw binary frames over WebSocket (LOW latency); taps/swipes on
+# the page go straight to `adb shell input` — no buttons.
+#
+# Public URL: printed in log + summary + pushed to repo as ANDROID_LIVE_URL.txt.
+# Stays alive ~2 hours.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/android-live.yml"
+      - "android-live/**"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: macos-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system image + create AVD
+        run: |
+          echo "arch: $(uname -m)"
+          echo "hv_support: $(sysctl -n kern.hv_support 2>/dev/null || echo n/a)"
+          echo "SDK root: $ANDROID_SDK_ROOT"
+          sdkmanager --version
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install 'system-images;android-35;google_apis;arm64-v8a' --channel=0 >/dev/null
+          # also grab newer platform-tools exactly matched to the runner (already present)
+          echo "installed system image:"
+          ls "$ANDROID_SDK_ROOT/system-images/android-35/google_apis/arm64-v8a" | head
+
+      - name: Boot Android emulator + stream + tunnel (~2 hours)
+        run: |
+          chmod +x android-live/run.sh
+          bash android-live/run.sh

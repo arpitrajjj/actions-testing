@@ -1,0 +1,55 @@
+!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Android Emulator — Live</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:#0b0d14;color:#e8ecf7;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  header{display:flex;align-items:center;gap:10px;padding:9px 14px;background:#141724;border-bottom:1px solid #232940;font-size:13px}
+  .dot{width:9px;height:9px;border-radius:50%;background:#ef4444;display:inline-block}
+  .dot.on{background:#22c55e}
+  .sp{flex:1}
+  #lat{color:#8f97ad;font-variant-numeric:tabular-nums}
+  #stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;touch-action:none;background:#000;overflow:hidden}
+  #screen{max-width:100%;max-height:100%;object-fit:contain;user-select:none;pointer-events:none;image-rendering:auto}
+  #touch{position:absolute;left:0;top:0;right:0;bottom:0;z-index:5;display:flex;align-items:center;justify-content:center}
+  #touch video{}
+  .ripple{position:absolute;width:44px;height:44px;border-radius:50%;border:2px solid rgba(255,255,255,.9);background:rgba(120,180,255,.35);transform:translate(-50%,-50%) scale(.6);pointer-events:none;opacity:0;transition:opacity .25s;z-index:6}
+  .ripple.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #bar{display:flex;gap:8px;padding:9px 12px;background:#141724;border-top:1px solid #232940}
+  .btn{background:#1c2133;border:1px solid #2a3147;color:#e8ecf7;border-radius:10px;padding:8px 11px;font-size:12.5px;cursor:pointer}
+  .btn:active{background:#2a3550}
+  #hint{font-size:11.5px;color:#8f97ad;padding:0 4px;align-self:center}
+  #txt{background:#0f1220;border:1px solid #2a3147;color:#e8ecf7;border-radius:10px;padding:8px 10px;font-size:12.5px;width:120px}
+  video{display:none}
+</style>
+</head>
+<body>
+<header>
+  <b>📱 Android Emulator — Live</b>
+  <span id="status"><span class="dot"></span><span id="stat">connecting</span></span>
+  <span class="sp"></span>
+  <span>tap · swipe · drag directly on screen</span>
+  <span id="lat"></span>
+</header>
+
+<div id="stage">
+  <img id="screen" alt="android">
+  <div id="ripple" class="ripple"></div>
+</div>
+
+<div id="bar">
+  <button class="btn" id="b-home">🏠</button>
+  <button class="btn" id="b-back">← back</button>
+  <button class="btn" id="b-recent">▢</button>
+  <input id="txt" placeholder="type text">
+  <button class="btn" id="b-send">⌨️</button>
+  <span class="sp"></span>
+  <span id="hint">one finger = tap · drag = swipe</span>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
