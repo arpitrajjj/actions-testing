@@ -40,9 +40,9 @@ jobs:
           export CMDTOOLS="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
           "$CMDTOOLS/sdkmanager" --version
           yes | "$CMDTOOLS/sdkmanager" --licenses >/dev/null 2>&1 || true
-          "$CMDTOOLS/sdkmanager" --install 'system-images;android-35;google_apis;x86_64' --channel=0
+          "$CMDTOOLS/sdkmanager" --install 'system-images;android-30;default;x86_64' --channel=0
           echo "--- installed images ---"
-          ls "$ANDROID_SDK_ROOT/system-images/android-35/google_apis/" 2>/dev/null || true
+          ls "$ANDROID_SDK_ROOT/system-images/android-30/default/" 2>/dev/null || true
 
       - name: Boot Android emulator + stream + tunnel (~2 hours)
         run: |

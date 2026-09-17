@@ -1,6 +1,5 @@
 #!/bin/bash
-# Android emulator — LIVE interactive stream (raw frames + adb touch) on macOS.
-# On the Intel runner HVF works, so we boot with hardware acceleration.
+# Android emulator — LIVE interactive stream (raw frames + adb touch) on macOS Intel.
 set -e
 cd "$GITHUB_WORKSPACE/android-live"
 export PORT="${PORT:-8090}"
@@ -10,32 +9,35 @@ ADB="$SDK/platform-tools/adb"
 EMU="$SDK/emulator/emulator"
 AVDMGR="$CMDTOOLS/avdmanager"
 export PATH="$SDK/platform-tools:$SDK/emulator:$CMDTOOLS:$PATH"
-IMAGE='system-images;android-35;google_apis;x86_64'
+IMAGE='system-images;android-30;default;x86_64'
 
 echo "arch=$(uname -m) hv=$(sysctl -n kern.hv_support 2>/dev/null || echo 0)"
 echo "SDK=$SDK"
 
-# ---- 1) create AVD ----
-echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE" -d pixel_7 || \
+# ---- 1) create AVD (light device so software rendering is fast) ----
+echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE" -d pixel_2 || \
 echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE"
 
-# ---- 2) boot headless WITH hardware acceleration (HVF on Intel) ----
+# ---- 2) boot headless with HVF acceleration ----
 nohup "$EMU" -avd live \
-  -no-window -no-audio -no-boot-anim -no-snapshot \
+  -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics \
   -gpu swiftshader_indirect \
   -memory 2048 -cores 2 > emu.log 2>&1 &
 EMUP=$!
 
 echo "waiting for device…"
 "$ADB" wait-for-device
+echo "device visible; waiting for boot_completed…"
 B=""
-for i in $(seq 1 120); do
+for i in $(seq 1 400); do    # up to ~20 min
+  sleep 3
   B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
   [ "$B" = "1" ] && break
-  sleep 3
+  BANIM=$("$ADB" shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')
+  [ "$BANIM" = "stopped" ] && { B=1; break; }
 done
 echo "boot_completed=$B"
-[ "$B" = "1" ] || { echo "BOOT TIMED OUT"; tail -40 emu.log; exit 1; }
+[ "$B" = "1" ] || { echo "BOOT TIMED OUT"; tail -20 emu.log; exit 1; }
 
 "$ADB" shell input keyevent 82 >/dev/null 2>&1 || true
 "$ADB" shell settings put system screen_off_timeout 2147483647 || true
