@@ -27,12 +27,11 @@ let snapBusy = false;
 function snap() {
   if (snapBusy) return;
   snapBusy = true;
-  execFile('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+  // encoding:'buffer' keeps stdout as a raw Buffer (PNG bytes untouched)
+  execFile('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024, encoding: 'buffer' }, (err, stdout) => {
     snapBusy = false;
     if (err) { /* transient; try again soon */ return; }
-    if (stdout && stdout.length > 1000) {
-      frameBuf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
-    }
+    if (stdout && stdout.length > 1000) frameBuf = stdout;
   });
 }
 setInterval(snap, 120);          // ~8 fps — low latency, still smooth
@@ -59,10 +58,10 @@ function adb(cmd, args) {
 app.get('/frame', (req, res) => {
   if (frameBuf.length === 0) {
     // try one fresh snapshot synchronously
-    return execFile('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
+    return execFile('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024, encoding: 'buffer' }, (err, stdout) => {
       if (err) return res.status(404).send('no frame yet');
       res.set('Content-Type', 'image/png').set('Cache-Control', 'no-store');
-      res.send(Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout));
+      res.send(stdout);
     });
   }
   res.set('Content-Type', 'image/png').set('Cache-Control', 'no-store');
