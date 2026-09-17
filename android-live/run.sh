@@ -1,5 +1,6 @@
 #!/bin/bash
 # Android emulator — LIVE interactive stream (raw frames + adb touch) on macOS.
+# On the Intel runner HVF works, so we boot with hardware acceleration.
 set -e
 cd "$GITHUB_WORKSPACE/android-live"
 export PORT="${PORT:-8090}"
@@ -9,31 +10,32 @@ ADB="$SDK/platform-tools/adb"
 EMU="$SDK/emulator/emulator"
 AVDMGR="$CMDTOOLS/avdmanager"
 export PATH="$SDK/platform-tools:$SDK/emulator:$CMDTOOLS:$PATH"
+IMAGE='system-images;android-35;google_apis;x86_64'
 
 echo "arch=$(uname -m) hv=$(sysctl -n kern.hv_support 2>/dev/null || echo 0)"
 echo "SDK=$SDK"
 
-# ---- 1) create AVD (image already installed by the workflow) ----
-echo no | "$AVDMGR" create avd --force -n live -k 'system-images;android-35;google_apis;arm64-v8a' -d pixel_7 || \
-echo no | "$AVDMGR" create avd --force -n live -k 'system-images;android-35;google_apis;arm64-v8a'
+# ---- 1) create AVD ----
+echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE" -d pixel_7 || \
+echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE"
 
-# ---- 2) boot headless, software rendering, software CPU (no nested virt) ----
+# ---- 2) boot headless WITH hardware acceleration (HVF on Intel) ----
 nohup "$EMU" -avd live \
   -no-window -no-audio -no-boot-anim -no-snapshot \
-  -gpu swiftshader_indirect -accel off \
+  -gpu swiftshader_indirect \
   -memory 2048 -cores 2 > emu.log 2>&1 &
 EMUP=$!
 
 echo "waiting for device…"
 "$ADB" wait-for-device
 B=""
-for i in $(seq 1 240); do
+for i in $(seq 1 120); do
   B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
   [ "$B" = "1" ] && break
   sleep 3
 done
 echo "boot_completed=$B"
-[ "$B" = "1" ] || { echo "BOOT TIMED OUT"; tail -30 emu.log; exit 1; }
+[ "$B" = "1" ] || { echo "BOOT TIMED OUT"; tail -40 emu.log; exit 1; }
 
 "$ADB" shell input keyevent 82 >/dev/null 2>&1 || true
 "$ADB" shell settings put system screen_off_timeout 2147483647 || true
@@ -65,7 +67,7 @@ echo "  📱 ANDROID EMULATOR IS LIVE: $URL"
 echo "  (tap/swipe directly on the screen — low latency)"
 echo "=================================================="
 {
-  echo "## 📱 Android Emulator — Live & interactive (macOS runner)"
+  echo "## 📱 Android Emulator — Live & interactive (macOS Intel runner)"
   echo "**Open now:** $URL"
   echo ""
   echo "_Tap / swipe / drag directly on the screen — no buttons. adb input relays every touch. ~2 hours._"
