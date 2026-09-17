@@ -61,10 +61,8 @@ if [ -n "$URL" ]; then
   echo "$URL" > ../IOS_LIVE_URL.txt
   git config user.name 'github-actions[bot]'
   git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-  git add ../IOS_LIVE_URL.txt
-  git commit -m "iOS simulator live URL [skip ci]" 2>/dev/null || true
-  git pull --rebase origin main --no-edit >/dev/null 2>&1 || true
-  git push origin HEAD:main 2>/dev/null || true
+  git add -f ../IOS_LIVE_URL.txt
+  ( git commit -m "iOS simulator live URL [skip ci]" && git push origin HEAD:main ) 2>/dev/null || true
 fi
 
 # ---- 7) keep the job (and tunnel) alive so you can play ~2 hours ----
