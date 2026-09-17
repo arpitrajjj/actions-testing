@@ -40,9 +40,10 @@ setTimeout(snap, 2000);
 // keep the display awake (headless emulator screen sleeps otherwise)
 function stayAwake() {
   execFile('adb', ['shell', 'svc', 'power', 'stayon', 'true'], { timeout: 4000 }, () => {});
+  execFile('adb', ['shell', 'input', 'keyevent', '224'], { timeout: 4000 }, () => {}); // WAKEUP (no-op when on)
 }
 stayAwake();
-setInterval(stayAwake, 45000);
+setInterval(stayAwake, 30000);
 
 // ---- geometry (used to scale tap coords) ----
 function getSize() {
