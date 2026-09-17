@@ -3,35 +3,41 @@
 set -e
 cd "$GITHUB_WORKSPACE/android-live"
 export PORT="${PORT:-8090}"
-export PATH="$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+SDK="$ANDROID_SDK_ROOT"
+CMDTOOLS="$SDK/cmdline-tools/latest/bin"
+ADB="$SDK/platform-tools/adb"
+EMU="$SDK/emulator/emulator"
+AVDMGR="$CMDTOOLS/avdmanager"
+export PATH="$SDK/platform-tools:$SDK/emulator:$CMDTOOLS:$PATH"
 
 echo "arch=$(uname -m) hv=$(sysctl -n kern.hv_support 2>/dev/null || echo 0)"
+echo "SDK=$SDK"
 
 # ---- 1) create AVD (image already installed by the workflow) ----
-echo no | avdmanager create avd --force -n live -k 'system-images;android-35;google_apis;arm64-v8a' -d pixel_7 || \
-echo no | avdmanager create avd --force -n live -k 'system-images;android-35;google_apis;arm64-v8a'
+echo no | "$AVDMGR" create avd --force -n live -k 'system-images;android-35;google_apis;arm64-v8a' -d pixel_7 || \
+echo no | "$AVDMGR" create avd --force -n live -k 'system-images;android-35;google_apis;arm64-v8a'
 
 # ---- 2) boot headless, software rendering, software CPU (no nested virt) ----
-nohup "$ANDROID_SDK_ROOT/emulator/emulator" -avd live \
+nohup "$EMU" -avd live \
   -no-window -no-audio -no-boot-anim -no-snapshot \
   -gpu swiftshader_indirect -accel off \
   -memory 2048 -cores 2 > emu.log 2>&1 &
 EMUP=$!
 
 echo "waiting for device…"
-adb wait-for-device
+"$ADB" wait-for-device
 B=""
 for i in $(seq 1 240); do
-  B=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+  B=$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
   [ "$B" = "1" ] && break
   sleep 3
 done
 echo "boot_completed=$B"
 [ "$B" = "1" ] || { echo "BOOT TIMED OUT"; tail -30 emu.log; exit 1; }
 
-adb shell input keyevent 82 >/dev/null 2>&1 || true
-adb shell settings put system screen_off_timeout 2147483647 || true
-adb shell wm size
+"$ADB" shell input keyevent 82 >/dev/null 2>&1 || true
+"$ADB" shell settings put system screen_off_timeout 2147483647 || true
+"$ADB" shell wm size
 
 # ---- 3) stream server ----
 npm install --no-audit --no-fund >/dev/null 2>&1 || true

@@ -38,12 +38,13 @@ jobs:
           echo "arch: $(uname -m)"
           echo "hv_support: $(sysctl -n kern.hv_support 2>/dev/null || echo n/a)"
           echo "SDK root: $ANDROID_SDK_ROOT"
-          sdkmanager --version
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager --install 'system-images;android-35;google_apis;arm64-v8a' --channel=0 >/dev/null
-          # also grab newer platform-tools exactly matched to the runner (already present)
-          echo "installed system image:"
-          ls "$ANDROID_SDK_ROOT/system-images/android-35/google_apis/arm64-v8a" | head
+          export CMDTOOLS="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
+          ls "$CMDTOOLS" || (echo "no cmdline-tools/latest, listing:"; ls -la "$ANDROID_SDK_ROOT/cmdline-tools")
+          "$CMDTOOLS/sdkmanager" --version
+          yes | "$CMDTOOLS/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$CMDTOOLS/sdkmanager" --install 'system-images;android-35;google_apis;arm64-v8a' --channel=0
+          echo "--- installed images ---"
+          ls "$ANDROID_SDK_ROOT/system-images/android-35/google_apis/" 2>/dev/null || true
 
       - name: Boot Android emulator + stream + tunnel (~2 hours)
         run: |
