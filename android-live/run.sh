@@ -46,9 +46,12 @@ for i in $(seq 1 60); do
   case "$SC" in *"found"*) echo "settings service up"; break;; esac
   sleep 2
 done
-"$ADB" shell input keyevent 82 >/dev/null 2>&1 || true
-for x in 1 2 3 4 5; do
-  "$ADB" shell settings put system screen_off_timeout 2147483647 >/dev/null 2>&1 && break
+"$ADB" shell input keyevent 224 >/dev/null 2>&1 || true   # WAKEUP
+"$ADB" shell input keyevent 82  >/dev/null 2>&1 || true   # dismiss keyguard
+# keep the display on permanently (headless emulator sleeps otherwise)
+for x in 1 2 3 4 5 6 7 8; do
+  "$ADB" shell svc power stayon true           >/dev/null 2>&1 && echo "stayon on" && break
+  "$ADB" shell settings put system screen_off_timeout 2147483647 >/dev/null 2>&1 && echo "timeout maxed" && break
   sleep 2
 done
 "$ADB" shell wm size || true

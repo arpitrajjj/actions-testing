@@ -37,6 +37,13 @@ function snap() {
 setInterval(snap, 180);          // ~5.5 fps — leaves CPU headroom so adb input stays snappy
 setTimeout(snap, 2000);
 
+// keep the display awake (headless emulator screen sleeps otherwise)
+function stayAwake() {
+  execFile('adb', ['shell', 'svc', 'power', 'stayon', 'true'], { timeout: 4000 }, () => {});
+}
+stayAwake();
+setInterval(stayAwake, 45000);
+
 // ---- geometry (used to scale tap coords) ----
 function getSize() {
   return new Promise((resolve) => {
