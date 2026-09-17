@@ -14,7 +14,8 @@ IMAGE='system-images;android-30;default;x86_64'
 echo "arch=$(uname -m) hv=$(sysctl -n kern.hv_support 2>/dev/null || echo 0)"
 echo "SDK=$SDK"
 
-# ---- 1) create AVD (light device so software rendering is fast) ----
+# ---- 1) create AVD (small device → cheap screencap + low latency) ----
+echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE" -d "Nexus 4" || \
 echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE" -d pixel_2 || \
 echo no | "$AVDMGR" create avd --force -n live -k "$IMAGE"
 

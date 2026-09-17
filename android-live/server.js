@@ -34,7 +34,7 @@ function snap() {
     if (stdout && stdout.length > 1000) frameBuf = stdout;
   });
 }
-setInterval(snap, 120);          // ~8 fps — low latency, still smooth
+setInterval(snap, 180);          // ~5.5 fps — leaves CPU headroom so adb input stays snappy
 setTimeout(snap, 2000);
 
 // ---- geometry (used to scale tap coords) ----
@@ -51,8 +51,16 @@ getSize();
 setInterval(getSize, 60000);
 
 // ---- touch relay: normalized (0..1) -> adb input ----
+// adb is fire-and-forget through a serial FIFO (keeps tap/swipe ordering) so the
+// client gets an instant 200 and the emulator isn't blocked by slow screencaps.
+let adbChain = Promise.resolve();
 function adb(cmd, args) {
-  return new Promise((resolve) => execFile('adb', [cmd, ...args], { timeout: 3000 }, () => resolve()));
+  adbChain = adbChain
+    .then(() => new Promise((resolve) => {
+      execFile('adb', [cmd, ...args], { timeout: 4000 }, () => resolve());
+    }))
+    .catch(() => {});
+  return Promise.resolve();   // respond to the client immediately
 }
 
 app.get('/frame', (req, res) => {
@@ -109,7 +117,7 @@ wss.on('connection', (ws) => {
   const timer = setInterval(() => {
     if (ws.readyState !== 1) return clearInterval(timer);
     if (frameBuf.length) ws.send(frameBuf);   // binary PNG frame
-  }, 120);
+  }, 180);
   ws.on('close', () => clearInterval(timer));
 });
 
