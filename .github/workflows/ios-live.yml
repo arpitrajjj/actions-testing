@@ -1,0 +1,46 @@
+name: iOS Simulator — Live & interactive (WebRTC + tunnel)
+
+# Boots the REAL Xcode iOS Simulator on a macOS runner, streams its screen to a
+# live page where taps are real clicks and apps + WebRTC camera/call work,
+# then exposes the page via a Cloudflare quick tunnel.
+#
+# The public URL is printed in the job log, written to the job summary, and pushed
+# to this repository as IOS_LIVE_URL.txt. The job stays alive ~2 hours so you can
+# actually use it from your phone/desktop.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ios-live.yml"
+      - "ios-live/**"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: macos-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          xcodebuild -version
+          echo "Xcode path: $(xcode-select -p)"
+          echo "Node: $(node -v)"
+          cd ios-live
+          npm install --no-audit --no-fund
+
+      - name: Boot iOS Simulator + serve + tunnel (2 hours)
+        run: |
+          chmod +x ios-live/run.sh
+          bash ios-live/run.sh

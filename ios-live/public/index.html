@@ -1,0 +1,84 @@
+!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iOS Simulator — Live (GitHub Actions)</title>
+<style>
+  :root{--bg:#0e1017;--card:#171a26;--line:#262b3d;--ink:#e8ecf7;--sub:#939bb3;--acc:#3b82f6}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+  header{display:flex;align-items:center;gap:12px;padding:12px 18px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header b{font-size:15px}
+  header .dot{width:9px;height:9px;border-radius:50%;background:#ef4444;display:inline-block;margin-left:4px}
+  header .dot.on{background:#22c55e}
+  .sp{flex:1}
+  .wrap{display:grid;grid-template-columns:1fr 340px;gap:18px;max-width:1400px;margin:18px auto;padding:0 18px}
+  @media(max-width:980px){.wrap{grid-template-columns:1fr}}
+  .stage{position:relative;background:#000;border-radius:18px;overflow:hidden;border:1px solid var(--line);min-height:520px;display:flex;align-items:center;justify-content:center}
+  #screen{max-width:100%;max-height:78vh;display:block;cursor:crosshair;image-rendering:auto}
+  .noframe{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:14px;text-align:center;padding:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:16px}
+  .card h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--sub)}
+  .apps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .appbtn{background:#1e2334;border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:10px 4px;font-size:12px;cursor:pointer;transition:.12s;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .appbtn:hover{border-color:var(--acc);background:#232943}
+  .appbtn .e{font-size:22px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .btn{flex:1;min-width:70px;background:#1e2334;border:1px solid var(--line);color:var(--ink);border-radius:11px;padding:9px;cursor:pointer;font-size:13px;white-space:nowrap}
+  .btn:hover{border-color:var(--acc)}
+  .btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+  video{width:100%;border-radius:12px;background:#000;min-height:110px;object-fit:cover}
+  .hint{font-size:12px;color:var(--sub);line-height:1.5}
+  .hint b{color:var(--ink)}
+  #status{font-size:12px;color:var(--sub)}
+  .peak{position:absolute;width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.85);background:rgba(59,130,246,.45);transform:translate(-50%,-50%);pointer-events:none;transition:opacity .4s;opacity:0;z-index:5}
+</style>
+</head>
+<body>
+<header>
+  <b>📱 iOS Simulator — Live</b>
+  <span id="status">connecting <span class="dot"></span></span>
+  <span class="sp"></span>
+  <span class="hint">Booted on a macOS <b>GitHub Actions</b> runner · streamed live</span>
+</header>
+<div class="wrap">
+  <div class="stage" id="stage">
+    <div class="noframe" id="noframe">Waiting for the simulator screen…</div>
+    <img id="screen" alt="iOS Simulator screen">
+    <div class="peak" id="peak"></div>
+  </div>
+  <div>
+    <div class="card">
+      <h3>Apps</h3>
+      <div class="apps" id="appgrid"></div>
+    </div>
+    <div class="card">
+      <h3>Phone controls</h3>
+      <div class="row">
+        <button class="btn" id="btn-home">🏠 Home</button>
+        <button class="btn" id="btn-lock">🔒 Lock</button>
+        <button class="btn" id="btn-wake">💡 Wake</button>
+      </div>
+      <div class="hint" style="margin-top:10px">Tap anywhere on the screen to click the simulator.</div>
+    </div>
+    <div class="card">
+      <h3>WebRTC fun</h3>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn pri" id="btn-cam">📷 Camera</button>
+        <button class="btn" id="btn-call">📞 Call</button>
+      </div>
+      <video id="localvideo" autoplay muted playsinline style="display:none;margin-bottom:8px"></video>
+      <div id="callvideos"></div>
+      <div class="hint" id="rtc-hint">Your camera streams to other viewers over a WebRTC peer connection.</div>
+    </div>
+    <div class="card">
+      <h3>Info</h3>
+      <div class="hint" id="info">Tap = real click in the Simulator · Apps launch real iOS apps · Home = ⌘⇧H.</div>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
