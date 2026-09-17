@@ -39,9 +39,18 @@ done
 echo "boot_completed=$B"
 [ "$B" = "1" ] || { echo "BOOT TIMED OUT"; tail -20 emu.log; exit 1; }
 
+# give system services a moment; wait until the settings service answers
+for i in $(seq 1 60); do
+  SC=$("$ADB" shell service check settings 2>/dev/null | tr -d '\r')
+  case "$SC" in *"found"*) echo "settings service up"; break;; esac
+  sleep 2
+done
 "$ADB" shell input keyevent 82 >/dev/null 2>&1 || true
-"$ADB" shell settings put system screen_off_timeout 2147483647 || true
-"$ADB" shell wm size
+for x in 1 2 3 4 5; do
+  "$ADB" shell settings put system screen_off_timeout 2147483647 >/dev/null 2>&1 && break
+  sleep 2
+done
+"$ADB" shell wm size || true
 
 # ---- 3) stream server ----
 npm install --no-audit --no-fund >/dev/null 2>&1 || true
