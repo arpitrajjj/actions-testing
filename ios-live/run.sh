@@ -27,10 +27,11 @@ SRV=$!
 sleep 2
 if ! kill -0 $SRV 2>/dev/null; then echo "SERVER FAILED"; cat server.log; exit 1; fi
 
-# ---- 4) Cloudflare quick tunnel ----
+# ---- 4) Cloudflare quick tunnel (macOS artifacts are .tgz) ----
 ARCH=$(uname -m)
-[ "$ARCH" = "arm64" ] && CFBIN=cloudflared-darwin-arm64 || CFBIN=cloudflared-darwin-amd64
-curl -sL -o cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/$CFBIN"
+[ "$ARCH" = "arm64" ] && CFARCH=arm64 || CFARCH=amd64
+curl -sL -o cf.tgz "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${CFARCH}.tgz"
+tar xzf cf.tgz
 chmod +x cloudflared
 ./cloudflared tunnel --url "http://localhost:$PORT" --no-autoupdate > cf.log 2>&1 &
 CFP=$!
